@@ -11,6 +11,7 @@
     input { padding: 8px; font-size: 16px; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    small { color: #555; }
   </style>
 </head>
 <body>
@@ -39,8 +40,7 @@
   let LAT = null, LON = null;
 
   // init date = today
-  const d = new Date();
-  document.getElementById("date").valueAsDate = d;
+  document.getElementById("date").valueAsDate = new Date();
 
   function getLocation() {
     if (!navigator.geolocation) {
@@ -65,7 +65,7 @@
     window.open(url, "_blank");
   }
 
-  // ---- Solar math (same logic as before, simplified) ----
+  // ---- Solar math ----
   function sinDeg(x){ return Math.sin(x*Math.PI/180); }
   function cosDeg(x){ return Math.cos(x*Math.PI/180); }
   function asinDeg(x){ return (180/Math.PI)*Math.asin(x); }
@@ -76,7 +76,7 @@
   }
 
   function dayOfYear(dateObj){
-    const start = new Date(dateObj.getFullYear(),0,0);
+    const start = new Date(dateObj.getFullYear(), 0, 0);
     const diff = dateObj - start;
     return Math.floor(diff / 86400000);
   }
@@ -113,16 +113,20 @@
 
       for (let m=0; m<24*60; m+=5){
         const localHours = m/60;
+
+        // approx solar time
         const solarHours = localHours + (lon - lon0)/15;
         const H = 15 * (solarHours - 12);
 
         const alt = solarAltitudeDeg(lat, delta, H);
         if (alt > 0){
           const azSun = solarAzimuthDeg(lat, delta, H, alt);
+
           const cosTheta =
             sinDeg(alt)*cosDeg(tilt) +
             cosDeg(alt)*sinDeg(tilt)*cosDeg(azSun - panelAz);
 
+          // weight: incidence * height factor
           const w = Math.max(0, cosTheta) * Math.max(0, sinDeg(alt));
           score += w;
         }
@@ -139,8 +143,12 @@
   function calc(){
     if (LAT == null) { alert("Сначала определите место."); return; }
 
-    const dateStr = document.getElementById("date").value;
-    const dateObj = dateStr ? new Date(dateStr + "T12:00:00") : new Date();
+    // SAFER date parsing (avoid browser quirks)
+    const dateStr = document.getElementById("date").value; // "YYYY-MM-DD"
+    const parts = dateStr.split("-").map(Number);
+    const dateObj = (parts.length === 3)
+      ? new Date(parts[0], parts[1]-1, parts[2], 12, 0, 0) // local time
+      : new Date();
 
     const panelAz = (LAT >= 0) ? 180 : 0;
     const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
