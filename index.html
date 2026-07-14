@@ -150,6 +150,21 @@
       ? new Date(parts[0], parts[1]-1, parts[2], 12, 0, 0) // local time
       : new Date();
 
+    // после dateObj
+const N = dayOfYear(dateObj);
+const delta = declinationDeg(N);
+const tzOffsetHours = -dateObj.getTimezoneOffset()/60;
+const lon0 = 15 * tzOffsetHours;
+
+// проверим точку в 12:00 локального времени
+const localHours = 12;
+const solarHours = localHours + (LON - lon0)/15;
+const H = 15 * (solarHours - 12);
+const alt = solarAltitudeDeg(LAT, delta, H);
+
+console.log({tzOffsetHours, lon0, N, delta, solarHours, H, alt});
+alert("Проверка: высота Солнца в ~12:00 = " + alt.toFixed(1) + "°");
+
     const panelAz = (LAT >= 0) ? 180 : 0;
     const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
 
