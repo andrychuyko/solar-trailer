@@ -42,8 +42,6 @@
 <script>
   // ---- UI state ----
   let LAT = null, LON = null;
-
-  // init date = today
   document.getElementById("date").valueAsDate = new Date();
 
   function getLocation() {
@@ -69,11 +67,19 @@
     window.open(url, "_blank");
   }
 
-  // ---- Solar math ----
+  // ---- Math helpers ----
   function sinDeg(x){ return Math.sin(x*Math.PI/180); }
   function cosDeg(x){ return Math.cos(x*Math.PI/180); }
+  function tanDeg(x){ return Math.tan(x*Math.PI/180); }
   function asinDeg(x){ return (180/Math.PI)*Math.asin(x); }
+  function atan2Deg(y,x){ return (180/Math.PI)*Math.atan2(y,x); }
+  function norm360(deg){
+    deg = deg % 360;
+    if (deg < 0) deg += 360;
+    return deg;
+  }
 
+  // ---- Solar helpers ----
   function dayOfYear(dateObj){
     const start = new Date(dateObj.getFullYear(), 0, 0);
     const diff = dateObj - start;
@@ -84,42 +90,30 @@
     return 23.45 * sinDeg((360/365) * (284 + N));
   }
 
+  // altitude (correct and stable)
   function solarAltitudeDeg(latDeg, deltaDeg, Hdeg){
     const s = sinDeg(latDeg)*sinDeg(deltaDeg) + cosDeg(latDeg)*cosDeg(deltaDeg)*cosDeg(Hdeg);
     return asinDeg(Math.max(-1, Math.min(1, s)));
   }
 
   /**
-   * cos(theta) через скалярное произведение в локальной системе ENU:
-   * x=East, y=North, z=Up
+   * Solar azimuth from NORTH clockwise (0=N, 90=E, 180=S, 270=W).
+   * This formula is stable with our H definition.
    *
-   * ВАЖНО: здесь yN (North) со знаком, который согласован с азимутом "от севера по часовой":
-   * 0=N, 90=E, 180=S, 270=W
+   * Hdeg: hour angle (deg), H=0 at solar noon, negative morning, positive afternoon.
    */
-  function cosIncidence_ENU(latDeg, deltaDeg, Hdeg, tiltDeg, panelAzFromNorthDeg){
-    // Sun vector in ENU (unit length)
-    const xE =  cosDeg(deltaDeg) * sinDeg(Hdeg);
-
-    // !!! Исправление: меняем знак North-компоненты (yN) !!!
-    // Было:
-    // const yN = cosDeg(latDeg) * sinDeg(deltaDeg) - sinDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
-    // Стало:
-    const yN = -(cosDeg(latDeg) * sinDeg(deltaDeg) - sinDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg));
-
-    const zU =  sinDeg(latDeg) * sinDeg(deltaDeg) + cosDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
-
-    // Panel normal in ENU:
-    // tilt=0 -> normal is Up (0,0,1)
-    // azimuth is direction the panel faces, measured clockwise from North
-    const nE = sinDeg(tiltDeg) * sinDeg(panelAzFromNorthDeg);
-    const nN = sinDeg(tiltDeg) * cosDeg(panelAzFromNorthDeg);
-    const nU = cosDeg(tiltDeg);
-
-    return xE*nE + yN*nN + zU*nU; // = cos(theta)
+  function solarAzimuthFromNorthDeg(latDeg, deltaDeg, Hdeg){
+    // azimuth from SOUTH (classic) = atan2( sinH, cosH*sinφ - tanδ*cosφ )
+    // then convert to azimuth from NORTH by +180°
+    const y = sinDeg(Hdeg);
+    const x = cosDeg(Hdeg)*sinDeg(latDeg) - tanDeg(deltaDeg)*cosDeg(latDeg);
+    const azFromSouth = atan2Deg(y, x);          // -180..+180
+    const azFromNorth = norm360(azFromSouth + 180.0);
+    return azFromNorth;
   }
 
   function optimalTilt(lat, lon, dateObj, panelAz){
-    const tzOffsetHours = -dateObj.getTimezoneOffset()/60; // e.g. MSK = +3
+    const tzOffsetHours = -dateObj.getTimezoneOffset()/60; // e.g. MSK=+3
     const lon0 = 15 * tzOffsetHours; // central meridian (rough)
 
     const N = dayOfYear(dateObj);
@@ -139,7 +133,12 @@
 
         const alt = solarAltitudeDeg(lat, delta, H);
         if (alt > 0){
-          const cosTheta = cosIncidence_ENU(lat, delta, H, tilt, panelAz);
+          const azSun = solarAzimuthFromNorthDeg(lat, delta, H);
+
+          // incidence on tilted plane (panelAz and azSun are both from NORTH clockwise)
+          const cosTheta =
+            sinDeg(alt)*cosDeg(tilt) +
+            cosDeg(alt)*sinDeg(tilt)*cosDeg(azSun - panelAz);
 
           // weight: incidence * height factor
           const w = Math.max(0, cosTheta) * Math.max(0, sinDeg(alt));
@@ -165,11 +164,15 @@
       ? new Date(parts[0], parts[1]-1, parts[2], 12, 0, 0)
       : new Date();
 
-    const panelAz = (LAT >= 0) ? 180 : 0; // fixed azimuth for the whole day
-    const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
     const L = Number(document.getElementById("len").value);
+    if (!(L > 0)) { alert("Введите длину панели L (м) > 0"); return; }
+
+    // Fixed azimuth for whole day: North hemisphere -> South (180°)
+    const panelAz = (LAT >= 0) ? 180 : 0;
+
+    const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
     const h = L * Math.sin(tilt * Math.PI / 180);
-    
+
     const out = document.getElementById("out");
     out.style.display = "block";
     out.innerHTML = `
