@@ -25,6 +25,10 @@
     <label>Дата: <input id="date" type="date"></label>
   </div>
 
+  <div class="row">
+    <label>Длина панели L (м): <input id="len" type="number" step="0.01" value="1.70"></label>
+  </div>
+
   <div class="row card">
     <div>Координаты: <span id="coords" class="mono">—</span></div>
     <div style="margin-top:8px;">
@@ -163,13 +167,16 @@
 
     const panelAz = (LAT >= 0) ? 180 : 0; // fixed azimuth for the whole day
     const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
-
+    const L = Number(document.getElementById("len").value);
+    const h = L * Math.sin(tilt * Math.PI / 180);
+    
     const out = document.getElementById("out");
     out.style.display = "block";
     out.innerHTML = `
       <b>Результат</b><br><br>
       Ориентация прицепа: <b>${panelAz}°</b> (${panelAz===180 ? "Юг" : "Север"}) по компасу (без магнитного склонения)<br>
       Оптимальный наклон: <b>${tilt}°</b> (диапазон 0–60°)<br>
+      Высота подъёма верхнего края: <b>${h.toFixed(2)} м</b><br>
       <small>Расчёт: максимум суммарной энергии за день, панель неподвижна.</small>
     `;
   }
