@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solar Trailer</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .row { margin: 10px 0; }
+    button { padding: 10px 14px; font-size: 16px; }
+    input { padding: 8px; font-size: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <h2>Ориентация и наклон солнечных панелей</h2>
+
+  <div class="row">
+    <button onclick="getLocation()">Определить место</button>
+  </div>
+
+  <div class="row">
+    <label>Дата: <input id="date" type="date"></label>
+  </div>
+
+  <div class="row card">
+    <div>Координаты: <span id="coords" class="mono">—</span></div>
+    <div style="margin-top:8px;">
+      <button onclick="calc()">Рассчитать</button>
+      <button onclick="openGMaps()">Открыть в Google Maps</button>
+    </div>
+  </div>
+
+  <div id="out" class="card" style="display:none;"></div>
+
+<script>
+  // ---- UI state ----
+  let LAT = null, LON = null;
+
+  // init date = today
+  const d = new Date();
+  document.getElementById("date").valueAsDate = d;
+
+  function getLocation() {
+    if (!navigator.geolocation) {
+      alert("Геолокация не поддерживается.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        LAT = pos.coords.latitude;
+        LON = pos.coords.longitude;
+        document.getElementById("coords").textContent =
+          LAT.toFixed(6) + ", " + LON.toFixed(6);
+      },
+      (err) => alert("Ошибка геолокации: " + err.message),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  function openGMaps() {
+    if (LAT == null) { alert("Сначала определите место."); return; }
+    const url = `https://www.google.com/maps?q=${LAT},${LON}`;
+    window.open(url, "_blank");
+  }
+
+  // ---- Solar math (same logic as before, simplified) ----
+  function sinDeg(x){ return Math.sin(x*Math.PI/180); }
+  function cosDeg(x){ return Math.cos(x*Math.PI/180); }
+  function asinDeg(x){ return (180/Math.PI)*Math.asin(x); }
+  function atan2Deg(y,x){
+    let d = (180/Math.PI)*Math.atan2(y,x);
+    if (d < 0) d += 360;
+    return d;
+  }
+
+  function dayOfYear(dateObj){
+    const start = new Date(dateObj.getFullYear(),0,0);
+    const diff = dateObj - start;
+    return Math.floor(diff / 86400000);
+  }
+
+  function declinationDeg(N){
+    return 23.45 * sinDeg((360/365) * (284 + N));
+  }
+
+  function solarAltitudeDeg(lat, delta, H){
+    const s = sinDeg(lat)*sinDeg(delta) + cosDeg(lat)*cosDeg(delta)*cosDeg(H);
+    return asinDeg(Math.max(-1, Math.min(1, s)));
+  }
+
+  function solarAzimuthDeg(lat, delta, H, alt){
+    const cosAlt = cosDeg(alt);
+    if (cosAlt < 1e-9) return 0;
+    const sinAz = (cosDeg(delta)*sinDeg(H)) / cosAlt;
+    const cosAz = (sinDeg(alt)*sinDeg(lat) - sinDeg(delta)) / (cosAlt*cosDeg(lat));
+    return atan2Deg(sinAz, cosAz);
+  }
+
+  function optimalTilt(lat, lon, dateObj, panelAz){
+    // timezone offset hours from device at that date
+    const tzOffsetHours = -dateObj.getTimezoneOffset()/60; // e.g. MSK = +3
+    const lon0 = 15 * tzOffsetHours;
+
+    const N = dayOfYear(dateObj);
+    const delta = declinationDeg(N);
+
+    let bestTilt = 0, bestScore = -1;
+
+    for (let tilt=0; tilt<=60; tilt+=1){
+      let score = 0;
+
+      for (let m=0; m<24*60; m+=5){
+        const localHours = m/60;
+        const solarHours = localHours + (lon - lon0)/15;
+        const H = 15 * (solarHours - 12);
+
+        const alt = solarAltitudeDeg(lat, delta, H);
+        if (alt > 0){
+          const azSun = solarAzimuthDeg(lat, delta, H, alt);
+          const cosTheta =
+            sinDeg(alt)*cosDeg(tilt) +
+            cosDeg(alt)*sinDeg(tilt)*cosDeg(azSun - panelAz);
+
+          const w = Math.max(0, cosTheta) * Math.max(0, sinDeg(alt));
+          score += w;
+        }
+      }
+
+      if (score > bestScore){
+        bestScore = score;
+        bestTilt = tilt;
+      }
+    }
+    return bestTilt;
+  }
+
+  function calc(){
+    if (LAT == null) { alert("Сначала определите место."); return; }
+
+    const dateStr = document.getElementById("date").value;
+    const dateObj = dateStr ? new Date(dateStr + "T12:00:00") : new Date();
+
+    const panelAz = (LAT >= 0) ? 180 : 0;
+    const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
+
+    const out = document.getElementById("out");
+    out.style.display = "block";
+    out.innerHTML = `
+      <b>Результат</b><br><br>
+      Ориентация прицепа: <b>${panelAz}°</b> (${panelAz===180 ? "Юг" : "Север"}) по компасу (без магнитного склонения)<br>
+      Оптимальный наклон: <b>${tilt}°</b> (диапазон 0–60°)<br>
+      <small>Расчёт: максимум суммарной энергии за день, панель неподвижна.</small>
+    `;
+  }
+</script>
+</body>
+</html>
