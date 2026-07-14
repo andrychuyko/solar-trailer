@@ -85,26 +85,36 @@
     return asinDeg(Math.max(-1, Math.min(1, s)));
   }
 
-  // Более надёжно, чем вычислять азимут Солнца: считаем cos(theta) через векторы в ENU
-  // ENU: x=East, y=North, z=Up
+  /**
+   * cos(theta) через скалярное произведение в локальной системе ENU:
+   * x=East, y=North, z=Up
+   *
+   * ВАЖНО: здесь yN (North) со знаком, который согласован с азимутом "от севера по часовой":
+   * 0=N, 90=E, 180=S, 270=W
+   */
   function cosIncidence_ENU(latDeg, deltaDeg, Hdeg, tiltDeg, panelAzFromNorthDeg){
-    // Sun vector (topocentric, in ENU)
-    const xE = cosDeg(deltaDeg) * sinDeg(Hdeg);
-    const yN = cosDeg(latDeg) * sinDeg(deltaDeg) - sinDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
-    const zU = sinDeg(latDeg) * sinDeg(deltaDeg) + cosDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
+    // Sun vector in ENU (unit length)
+    const xE =  cosDeg(deltaDeg) * sinDeg(Hdeg);
 
-    // Panel normal vector in ENU:
+    // !!! Исправление: меняем знак North-компоненты (yN) !!!
+    // Было:
+    // const yN = cosDeg(latDeg) * sinDeg(deltaDeg) - sinDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
+    // Стало:
+    const yN = -(cosDeg(latDeg) * sinDeg(deltaDeg) - sinDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg));
+
+    const zU =  sinDeg(latDeg) * sinDeg(deltaDeg) + cosDeg(latDeg) * cosDeg(deltaDeg) * cosDeg(Hdeg);
+
+    // Panel normal in ENU:
     // tilt=0 -> normal is Up (0,0,1)
-    // azimuth measured clockwise from North: 0=N, 90=E, 180=S, 270=W
+    // azimuth is direction the panel faces, measured clockwise from North
     const nE = sinDeg(tiltDeg) * sinDeg(panelAzFromNorthDeg);
     const nN = sinDeg(tiltDeg) * cosDeg(panelAzFromNorthDeg);
     const nU = cosDeg(tiltDeg);
 
-    return xE*nE + yN*nN + zU*nU; // ~cos(theta)
+    return xE*nE + yN*nN + zU*nU; // = cos(theta)
   }
 
   function optimalTilt(lat, lon, dateObj, panelAz){
-    // timezone offset hours from device at that date
     const tzOffsetHours = -dateObj.getTimezoneOffset()/60; // e.g. MSK = +3
     const lon0 = 15 * tzOffsetHours; // central meridian (rough)
 
@@ -127,7 +137,7 @@
         if (alt > 0){
           const cosTheta = cosIncidence_ENU(lat, delta, H, tilt, panelAz);
 
-          // weight: incidence * height factor (so low sun contributes less)
+          // weight: incidence * height factor
           const w = Math.max(0, cosTheta) * Math.max(0, sinDeg(alt));
           score += w;
         }
@@ -144,17 +154,14 @@
   function calc(){
     if (LAT == null) { alert("Сначала определите место."); return; }
 
-    // SAFER local date parsing (avoid browser quirks)
+    // safe local date parsing
     const dateStr = document.getElementById("date").value; // "YYYY-MM-DD"
     const parts = dateStr.split("-").map(Number);
     const dateObj = (parts.length === 3)
-      ? new Date(parts[0], parts[1]-1, parts[2], 12, 0, 0) // local time at noon
+      ? new Date(parts[0], parts[1]-1, parts[2], 12, 0, 0)
       : new Date();
 
-    // Fixed azimuth for whole day:
-    // North hemisphere -> South (180). South hemisphere -> North (0).
-    const panelAz = (LAT >= 0) ? 180 : 0;
-
+    const panelAz = (LAT >= 0) ? 180 : 0; // fixed azimuth for the whole day
     const tilt = optimalTilt(LAT, LON, dateObj, panelAz);
 
     const out = document.getElementById("out");
